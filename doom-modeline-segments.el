@@ -388,7 +388,7 @@ mouse-1: Previous buffer\nmouse-3: Next buffer"
   (when doom-modeline-buffer-state-icon
     (when-let ((icon (doom-modeline-update-buffer-file-state-icon)))
       (unless (string-empty-p icon)
-        (concat
+        (list
          (doom-modeline-display-icon icon)
          doom-modeline-vspc)))))
 
@@ -428,7 +428,7 @@ mouse-1: Previous buffer\nmouse-3: Next buffer"
 
 Including the current working directory, the file name, and its state (modified,
 read-only or non-existent)."
-  (concat
+  (list
    doom-modeline-spc
    (doom-modeline--buffer-mode-icon)
    (doom-modeline--buffer-state-icon)
@@ -494,7 +494,7 @@ project directory is important."
   "Displays the eol and the encoding style of the buffer."
   (when doom-modeline-buffer-encoding
     (let ((mouse-face 'doom-modeline-highlight))
-      (concat
+      (list
        doom-modeline-spc
 
        ;; eol type
@@ -502,22 +502,7 @@ project directory is important."
          (when (or (eq doom-modeline-buffer-encoding t)
                    (and (eq doom-modeline-buffer-encoding 'nondefault)
                         (not (equal eol doom-modeline-default-eol-type))))
-           (propertize
-            (pcase eol
-              (0 "LF ")
-              (1 "CRLF ")
-              (2 "CR ")
-              (_ ""))
-            'mouse-face mouse-face
-            'help-echo (format "End-of-line style: %s\nmouse-1: Cycle"
-                               (pcase eol
-                                 (0 "Unix-style LF")
-                                 (1 "DOS-style CRLF")
-                                 (2 "Mac-style CR")
-                                 (_ "Undecided")))
-            'local-map (let ((map (make-sparse-keymap)))
-                         (define-key map [mode-line mouse-1] 'mode-line-change-eol)
-                         map))))
+           (doom-modeline--buffer-encoding-eol-type eol)))
 
        ;; coding system
        (let* ((sys (coding-system-plist buffer-file-coding-system))
@@ -538,6 +523,30 @@ project directory is important."
 
        doom-modeline-spc))))
 
+(defvar doom-modeline--buffer-encoding-eol-type-cache nil)
+
+(defun doom-modeline--buffer-encoding-eol-type (eol)
+  (let ((v (alist-get eol doom-modeline--buffer-encoding-eol-type-cache)))
+    (when (not v)
+      (setq v
+            (propertize
+             (pcase eol
+               (0 "LF ")
+               (1 "CRLF ")
+               (2 "CR ")
+               (_ ""))
+             'mouse-face 'doom-modeline-highlight
+             'help-echo (format "End-of-line style: %s\nmouse-1: Cycle"
+                                (pcase eol
+                                  (0 "Unix-style LF")
+                                  (1 "DOS-style CRLF")
+                                  (2 "Mac-style CR")
+                                  (_ "Undecided")))
+             'local-map (let ((map (make-sparse-keymap)))
+                          (define-key map [mode-line mouse-1] 'mode-line-change-eol)
+                          map)))
+      (push (cons eol v) doom-modeline--buffer-encoding-eol-type-cache))
+    v))
 
 ;;
 ;; Indentation
@@ -580,30 +589,29 @@ project directory is important."
 
 (doom-modeline-def-segment major-mode
   "The major mode, including environment and text-scale info."
-  (propertize
-   (concat
-    doom-modeline-spc
-    (propertize (format-mode-line
-                 (or (and (boundp 'delighted-modes)
-                          (cadr (assq major-mode delighted-modes)))
-                     mode-name))
-                'help-echo "Major mode\n\
+  (list
+   doom-modeline-spc
+   (propertize (format-mode-line
+                (or (and (boundp 'delighted-modes)
+                         (cadr (assq major-mode delighted-modes)))
+                    mode-name))
+               'help-echo "Major mode\n\
   mouse-1: Display major mode menu\n\
   mouse-2: Show help for major mode\n\
   mouse-3: Toggle minor modes"
-                'mouse-face 'doom-modeline-highlight
-                'local-map mode-line-major-mode-keymap)
-    (when (and doom-modeline-env-version doom-modeline-env--version)
-      (format "%s%s" doom-modeline-vspc doom-modeline-env--version))
-    (and (boundp 'text-scale-mode-amount)
-         (/= text-scale-mode-amount 0)
-         (format
-          (if (> text-scale-mode-amount 0)
-              " (%+d)"
-            " (%-d)")
-          text-scale-mode-amount))
-    doom-modeline-spc)
-   'face (doom-modeline-face 'doom-modeline-buffer-major-mode)))
+               'mouse-face 'doom-modeline-highlight
+               'local-map mode-line-major-mode-keymap
+               'face (doom-modeline-face 'doom-modeline-buffer-major-mode))
+   (when (and doom-modeline-env-version doom-modeline-env--version)
+     (format "%s%s" doom-modeline-vspc doom-modeline-env--version))
+   (and (boundp 'text-scale-mode-amount)
+        (/= text-scale-mode-amount 0)
+        (format
+         (if (> text-scale-mode-amount 0)
+             " (%+d)"
+           " (%-d)")
+         text-scale-mode-amount))
+   doom-modeline-spc))
 
 
 ;;
@@ -731,17 +739,24 @@ Uses `all-the-icons-octicon' to fetch the icon."
   "Displays the current branch, colored based on its state."
   (when-let ((icon doom-modeline--vcs-icon)
              (text doom-modeline--vcs-text))
-    (concat
-     doom-modeline-spc
-     (propertize (concat
-                  (doom-modeline-display-icon icon)
-                  doom-modeline-vspc
-                  (doom-modeline-display-text text))
-                 'mouse-face 'doom-modeline-highlight
-                 'help-echo (get-text-property 1 'help-echo vc-mode)
-                 'local-map (get-text-property 1 'local-map vc-mode))
-     doom-modeline-spc)))
+    (let* ((key (list icon text (doom-modeline--active)))
+           (val (alist-get key doom-modeline--segment-vcs-cache nil nil #'equal)))
+      (when (not val)
+        (setq val
+              (propertize (concat
+                           (doom-modeline-display-icon icon)
+                           doom-modeline-vspc
+                           (doom-modeline-display-text text))
+                          'mouse-face 'doom-modeline-highlight
+                          'help-echo (get-text-property 1 'help-echo vc-mode)
+                          'local-map (get-text-property 1 'local-map vc-mode)))
+        (push (cons key val) doom-modeline--segment-vcs-cache))
+      (list
+       doom-modeline-spc
+       val
+       doom-modeline-spc))))
 
+(defvar doom-modeline--segment-vcs-cache nil)
 
 ;;
 ;; Checker
@@ -1675,15 +1690,22 @@ See `mode-line-percent-position'.")
               (column-number-mode (doom-modeline-column-zero-based ":%c" ":%C"))))
         (mouse-face 'doom-modeline-highlight)
         (local-map mode-line-column-line-number-mode-map))
-    (concat
+    (list
      doom-modeline-wspc
 
      ;; Line and column
-     (propertize (format-mode-line lc)
-                 'help-echo "Buffer position\n\
+     (let* ((s (format-mode-line lc))
+            (extra (max 0 (- 7 (length s)))))
+       (add-text-properties
+        0 (length s)
+        `(help-echo "Buffer position\n\
 mouse-1: Display Line and Column Mode Menu"
-                 'mouse-face mouse-face
-                 'local-map local-map)
+          mouse-face ,mouse-face
+          local-map ,local-map)
+        s)
+       (list
+        (make-string extra ?\ )
+        s))
 
      ;; Position
      (cond ((and visible
@@ -1715,7 +1737,7 @@ mouse-1: Display Line and Column Mode Menu"
 
      ;; Percent position
      (when doom-modeline-percent-position
-       (concat
+       (list
         doom-modeline-spc
         (propertize (format-mode-line '("" doom-modeline-percent-position "%%"))
                     'help-echo "Buffer percentage\n\
